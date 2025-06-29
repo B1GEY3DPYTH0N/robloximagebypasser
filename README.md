@@ -1,5 +1,7 @@
 # roblox image bypasser
 
+addition as of 29/06/2025: now has a batch uploading feature.
+
 a website that lets you bypass roblox's image moderation system by manually reconstructing an image using individual pixels, or blocks. many other similar tools that do this exist, but this one is different, as it uses [rectangle packing](https://en.wikipedia.org/wiki/Rectangle_packing) to reconstruct the image inside of roblox, which heavily reduces the amount of pixels needed and greatly increases performance in-game.
 
 you can use it at [https://infinixi.us/robloximagebypasser](https://infinixi.us/robloximagebypasser)!

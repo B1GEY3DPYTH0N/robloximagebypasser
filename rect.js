@@ -1,132 +1,57 @@
-// this is where the magic happens
-export function divideIntoRectangles(image, threshold) {
-	const rectangles = []
+/* rect.js  —  UN-MODULE'D VERSION */
+function divideIntoRectangles(pixels, threshold) {
+  // pixels is a 2-D array of [r,g,b,a]; threshold 0-255
+  const w = pixels.length;
+  const h = pixels[0].length;
+  const rects = [];
 
-	function splitRectangle(rect) {
-		const { x, y, width, height } = rect
+  const used = Array.from({ length: w }, () =>
+    Array(h).fill(false)
+  );
 
-		// calculate average color within the rectangle
-		let sumR = 0
-		let sumG = 0
-		let sumB = 0
-		let sumA = 0
-		for (let i = x; i < x + width; i++) {
-			for (let j = y; j < y + height; j++) {
-				sumR += image[i][j][0]
-				sumG += image[i][j][1]
-				sumB += image[i][j][2]
-				sumA += image[i][j][3]
-			}
-		}
-		const averageColor = [
-			Math.floor(sumR / (width * height)),
-			Math.floor(sumG / (width * height)),
-			Math.floor(sumB / (width * height)),
-			Math.floor(sumA / (width * height)),
-		]
-
-		// if difference in colors is greater than threshold, split the rectangle
-		let colorDiff = 0
-		for (let i = x; i < x + width; i++) {
-			for (let j = y; j < y + height; j++) {
-				const diffR = Math.abs(image[i][j][0] - averageColor[0])
-				const diffG = Math.abs(image[i][j][1] - averageColor[1])
-				const diffB = Math.abs(image[i][j][2] - averageColor[2])
-				const diffA = Math.abs(image[i][j][3] - averageColor[3])
-				colorDiff += Math.max(diffR, diffG, diffB, diffA)
-			}
-		}
-
-		if (colorDiff > threshold) {
-			// split the rectangle into four equal sub-rectangles
-			const halfWidth = Math.floor(width / 2)
-			const halfHeight = Math.floor(height / 2)
-
-			const rect1 = { x, y, width: halfWidth, height: halfHeight }
-			const rect2 = {
-				x: x + halfWidth,
-				y,
-				width: halfWidth,
-				height: halfHeight,
-			}
-			const rect3 = {
-				x,
-				y: y + halfHeight,
-				width: halfWidth,
-				height: halfHeight,
-			}
-			const rect4 = {
-				x: x + halfWidth,
-				y: y + halfHeight,
-				width: halfWidth,
-				height: halfHeight,
-			}
-
-			// recursively split the sub-rectangles
-			splitRectangle(rect1)
-			splitRectangle(rect2)
-			splitRectangle(rect3)
-			splitRectangle(rect4)
-		} else {
-			// add the rectangle coordinates and color to the list of final rectangles
-			rectangles.push({ rect, color: averageColor })
-		}
-	}
-
-	// start with the entire image as a single rectangle
-	const initialRectangle = {
-		x: 0,
-		y: 0,
-		width: image.length,
-		height: image[0].length,
-	}
-	
-	if (threshold > 0) {
-		splitRectangle(initialRectangle)
-	} else {
-		for (const x in image) {
-			for (const y in image[x]) {
-				rectangles.push({
-					rect: { x, y, width: 1, height: 1 },
-					color: image[x][y],
-				})
-			}
-		}
-	}
-
-	return rectangles
-}
-
-window.divideIntoRectangles = divideIntoRectangles;
-
-export function reassembleImage(rectangles, width, height) {
-	const image = []
-  
-	// initialize the image array with empty pixels
-	for (let i = 0; i < width; i++) {
-		image[i] = []
-		for (let j = 0; j < height; j++) {
-			image[i][j] = [0, 0, 0]
-		}
-	}
-  
-	// fill in the image array with colors from the rectangles
-	for (const { rect, color } of rectangles) {
-		const { x, y, width, height } = rect
-	
-		// adjust the rectangle coordinates and dimensions
-		const adjustedX = x > 0 ? x - 1 : x
-		const adjustedY = y > 0 ? y - 1 : y
-		const adjustedWidth = x + width < width ? width + 1 : width
-		const adjustedHeight = y + height < height ? height + 1 : height
-	
-		// fill in the adjusted rectangle with the color
-		for (let i = adjustedX; i < adjustedX + adjustedWidth; i++) {
-			for (let j = adjustedY; j < adjustedY + adjustedHeight; j++) {
-				image[i][j] = color
-			}
-		}
-	}
-  
-	return image
+  function same(c1, c2) {
+    const d =
+      Math.abs(c1[0] - c2[0]) +
+      Math.abs(c1[1] - c2[1]) +
+      Math.abs(c1[2] - c2[2]) +
+      Math.abs(c1[3] - c2[3]);
+    return d <= threshold * 4; // quick + cheap
   }
+
+  for (let x = 0; x < w; x++) {
+    for (let y = 0; y < h; y++) {
+      if (used[x][y]) continue;
+      const col = pixels[x][y];
+
+      // grow right
+      let maxW = 1;
+      while (
+        x + maxW < w &&
+        !used[x + maxW][y] &&
+        same(col, pixels[x + maxW][y])
+      )
+        maxW++;
+
+      // grow down with same colour row-by-row
+      let maxH = 1;
+      outer: while (y + maxH < h) {
+        for (let xx = 0; xx < maxW; xx++)
+          if (
+            used[x + xx][y + maxH] ||
+            !same(col, pixels[x + xx][y + maxH])
+          )
+            break outer;
+        maxH++;
+      }
+
+      // mark used & store rect
+      for (let xx = 0; xx < maxW; xx++)
+        for (let yy = 0; yy < maxH; yy++)
+          used[x + xx][y + yy] = true;
+
+      rects.push({ rect: { x, y, width: maxW, height: maxH }, color: col });
+    }
+  }
+  return rects;
+}
+window.divideIntoRectangles = divideIntoRectangles; // make global

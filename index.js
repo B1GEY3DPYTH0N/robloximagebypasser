@@ -13,14 +13,14 @@ const exportBtn           = document.getElementById("export");
 // info panel spans
 const sizeSpan        = document.getElementById("size");
 const pixelsSpan      = document.getElementById("pixels");
-const blocksSpan      = document.getElementById("blocks");
+const blocksCountSpan = document.getElementById("blocksCount");
 const improvementSpan = document.getElementById("improvement");
 const timeSpan        = document.getElementById("time");
 const errorBox        = document.getElementById("error");
 
 // canvases (single-image preview only)
 const canvasOriginal = document.getElementById("original");
-const canvasBlocks   = document.getElementById("blocks");
+const canvasBlocks   = document.getElementById("blocksCanvas");
 const canvasFinal    = document.getElementById("final");
 const ctxBlocks      = canvasBlocks.getContext("2d");
 const ctxFinal       = canvasFinal.getContext("2d");
@@ -36,7 +36,7 @@ function setInfo(field, value) {
   const map = {
     size: sizeSpan,
     pixels: pixelsSpan,
-    blocks: blocksSpan,
+    blocks: blocksCountSpan,
     improvement: improvementSpan,
     time: timeSpan
   };

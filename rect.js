@@ -97,6 +97,8 @@ export function divideIntoRectangles(image, threshold) {
 	return rectangles
 }
 
+window.divideIntoRectangles = divideIntoRectangles;
+
 export function reassembleImage(rectangles, width, height) {
 	const image = []
   

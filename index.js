@@ -1,283 +1,241 @@
-/* global IJS, divideIntoRectangles */
+import { setDebugText, commaSeparate, range, range2, randInt, chunkArray } from "./utility.js"
+import { divideIntoRectangles, reassembleImage } from "./rect.js"
+import { generateFrame, header, footer } from "./export.js"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Handy DOM references
-// ─────────────────────────────────────────────────────────────────────────────
-const fileupload          = document.getElementById("image");
-const thresholdSlider     = document.getElementById("threshold");
-const thresholdValueSpan  = document.getElementById("threshold-value");
-const thresholdInfoSpan   = document.getElementById("threshold-info");
-const enableTransparency  = document.getElementById("enabletransparency");
-const exportBtn           = document.getElementById("export");
+// define our variables
 
-// info panel spans
-const sizeSpan        = document.getElementById("size");
-const pixelsSpan      = document.getElementById("pixels");
-const blocksCountSpan = document.getElementById("blocksCount");
-const improvementSpan = document.getElementById("improvement");
-const timeSpan        = document.getElementById("time");
-const errorBox        = document.getElementById("error");
+const original_canvas = document.querySelector("#original")
+const original_ctx = original_canvas.getContext("2d")
 
-// canvases (single-image preview only)
-const canvasOriginal = document.getElementById("original");
-const canvasBlocks   = document.getElementById("blocksCanvas");
-const canvasFinal    = document.getElementById("final");
-const ctxBlocks      = canvasBlocks.getContext("2d");
-const ctxFinal       = canvasFinal.getContext("2d");
+const blocks_canvas = document.querySelector("#blocks")
+const blocks_ctx = blocks_canvas.getContext("2d")
 
-let lastURL = null;          // for revoking object-URLs
-let singleImage = null;      // IJS.Image in single-preview mode
-let multiMode = false;       // true when >1 file selected
+const final_canvas = document.querySelector("#final")
+const final_ctx = final_canvas.getContext("2d")
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers to update “information:” panel
-// ─────────────────────────────────────────────────────────────────────────────
-function setInfo(field, value) {
-  const map = {
-    size: sizeSpan,
-    pixels: pixelsSpan,
-    blocks: blocksCountSpan,
-    improvement: improvementSpan,
-    time: timeSpan
-  };
-  if (map[field]) map[field].textContent = value;
+//const offset = document.querySelector("#offset")
+const threshold = document.querySelector("#threshold")
+const fileupload = document.querySelector(`input[type="file"]`)
+const extreme = document.querySelector("#extreme")
+const enabletransparency = document.querySelector("#transparency")
+const error = document.querySelector("#error")
+
+// the init function is called when an image is uploaded
+
+async function init() {
+	original_canvas.width = image.width
+	original_canvas.height = image.height
+
+	blocks_canvas.width = image.width
+	blocks_canvas.height = image.height
+
+	final_canvas.width = image.width
+	final_canvas.height = image.height
+
+	setDebugText("size", `${image.width}x${image.height}`)
+	setDebugText("pixels", commaSeparate(image.width * image.height))
+
+	for (const x of range(image.width)) {
+		for (const y of range(image.height)) {
+			var pixel = image.getPixelXY(x, y)
+
+			original_ctx.fillStyle = `rgba(${pixel[0]}, ${pixel[1]}, ${pixel[2]}, ${pixel[3] ?? 255})`
+			original_ctx.fillRect(x, y, 1, 1)
+		}	
+	}
+
+	document.querySelector("#linewarning").innerHTML = "note: the squares/lines that may show up here will not <br> show up in-game."
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// File input change → decide between single-image preview or batch mode
-// ─────────────────────────────────────────────────────────────────────────────
-fileupload.addEventListener("change", async evt => {
-  const files = evt.target.files;
-  if (!files.length) return;
+// this function isn't used anymore but i didnt wanna get rid of it
+function splitImage() {
+	var colors = {}
 
-  errorBox.textContent = "";
-  thresholdSlider.disabled = false;
+	for (const x of range(image.width)) {
+		for (const y of range(image.height)) {
+			var pixel = image.getPixelXY(x, y)
+			var color = `${pixel[0]}, ${pixel[1]}, ${pixel[2]}, ${pixel[3] ?? 255}`
 
-  if (files.length === 1) {
-    // ── Single-image preview mode ──
-    multiMode = false;
-    const file = files[0];
+			if (colors[color] == undefined) {
+				colors[color] = []
+			}
 
-    // revoke previous object URL
-    if (lastURL) URL.revokeObjectURL(lastURL);
-    lastURL = URL.createObjectURL(file);
+			colors[color].push([x, y])
+		}	
 
-    try {
-      singleImage = await IJS.Image.load(lastURL);
-    } catch (e) {
-      errorBox.textContent = `Error loading image: ${e}`;
-      return;
-    }
+	}
 
-    // draw original to canvas (hidden but sized)
-    canvasOriginal.width  = singleImage.width;
-    canvasOriginal.height = singleImage.height;
-    canvasBlocks.width    = singleImage.width;
-    canvasBlocks.height   = singleImage.height;
-    canvasFinal.width     = singleImage.width;
-    canvasFinal.height    = singleImage.height;
-    canvasOriginal.getContext("2d").putImageData(
-      new ImageData(singleImage.data, singleImage.width),
-      0, 0
-    );
-
-    await processAndPreviewSingle();
-
-  } else {
-    // ── Batch mode (no preview) ──
-    multiMode = true;
-    singleImage = null;
-
-    // Clear preview canvases & info
-    ctxBlocks.clearRect(0, 0, canvasBlocks.width, canvasBlocks.height);
-    ctxFinal.clearRect(0, 0, canvasFinal.width, canvasFinal.height);
-    ["size","pixels","blocks","improvement","time"].forEach(f => setInfo(f,"–"));
-
-    errorBox.textContent =
-      `Selected ${files.length} images. Choose threshold, then click “Export”.`;
-  }
-});
-
-// when slider moves, update text + (if single-preview) re-render
-thresholdSlider.addEventListener("input", () => {
-  thresholdValueSpan.textContent  = thresholdSlider.value;
-  thresholdInfoSpan.textContent   = thresholdSlider.value;
-  if (!multiMode && singleImage) processAndPreviewSingle();
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Preview routine (single image only)
-// ─────────────────────────────────────────────────────────────────────────────
-async function processAndPreviewSingle() {
-  const t0 = performance.now();
-
-  const pixels = [];
-  for (let x = 0; x < singleImage.width; x++) {
-    const col = [];
-    for (let y = 0; y < singleImage.height; y++) {
-      col.push(singleImage.getPixelXY(x, y));
-    }
-    pixels.push(col);
-  }
-
-  const rects = divideIntoRectangles(pixels, +thresholdSlider.value);
-
-  // draw “blocky” preview
-  ctxBlocks.clearRect(0,0,canvasBlocks.width,canvasBlocks.height);
-  for (const {rect, color} of rects) {
-    const [r,g,b,a] = color;
-    ctxBlocks.fillStyle = `rgba(${r},${g},${b},${a/255})`;
-    ctxBlocks.fillRect(rect.x, rect.y, rect.width, rect.height);
-  }
-
-  // draw final reassembled preview
-  ctxFinal.putImageData(
-    new ImageData(singleImage.data, singleImage.width),
-    0,0
-  );
-
-  // Update info panel
-  const pixelsCount = singleImage.width * singleImage.height;
-  setInfo("size", `${singleImage.width}×${singleImage.height}`);
-  setInfo("pixels", pixelsCount.toLocaleString());
-  setInfo("blocks", rects.length.toLocaleString());
-  setInfo("improvement",
-    ((1 - rects.length / pixelsCount) * 100).toFixed(0) + "%");
-  setInfo("time", (performance.now() - t0).toFixed(0) + " ms");
+	return colors
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FRAME → RBXMX snippet
-// ─────────────────────────────────────────────────────────────────────────────
-function frameXML(px, py, w, h, imgW, imgH, scale, r,g,b,a) {
-  // position & size as UDim2 (scale, offset)
-  const posX = (px / imgW).toFixed(6);
-  const posY = (py / imgH).toFixed(6);
-  const sizeX= (w  / imgW).toFixed(6);
-  const sizeY= (h  / imgH).toFixed(6);
+// get a 2d array of pixels from a rectangular area
+function getPixels(x1, y1, x2, y2) {
+	var pixels = []
 
-  return `
-                <Item class="Frame">
-                    <Properties>
-                        <bool name="Active">true</bool>
-                        <UDim2 name="Position">
-                            <XS>${posX}</XS><XO>0</XO>
-                            <YS>${posY}</YS><YO>0</YO>
-                        </UDim2>
-                        <UDim2 name="Size">
-                            <XS>${sizeX}</XS><XO>0</XO>
-                            <YS>${sizeY}</YS><YO>0</YO>
-                        </UDim2>
-                        <float name="BackgroundTransparency">${(255-a)/255}</float>
-                        <Color3 name="BackgroundColor3">
-                            <R>${(r/255).toFixed(4)}</R>
-                            <G>${(g/255).toFixed(4)}</G>
-                            <B>${(b/255).toFixed(4)}</B>
-                        </Color3>
-                    </Properties>
-                </Item>`;
+	for (const x of range2(x1, x2)) {
+		var row = []
+		for (const y of range2(y1, y2)) {
+			row.push(image.getPixelXY(x, y))
+		}
+		pixels.push(row)
+	}
+
+	return pixels
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// EXPORT → single RBXMX (model with multiple SurfaceGuis)
-// ─────────────────────────────────────────────────────────────────────────────
-exportBtn.addEventListener("click", async () => {
-  const files = fileupload.files;
-  if (!files.length) { errorBox.textContent = "No images selected."; return; }
+// the main script, runs every time the threshold is changed
+function run() {
+	var startTime = Date.now()
 
-  const threshold = +thresholdSlider.value;
-  const keepAlpha = enableTransparency.checked;
+	var pixels = getPixels(0, 0, image.width, image.height)
 
-  const header =
-`<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime"
-        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4">
-    <Meta name="ExplicitAutoJoints">true</Meta>
-    <External>null</External>
-    <External>nil</External>
-    <Item class="Model">
-        <Properties>
-            <string name="Name">BypassedImages</string>
-            <BinaryString name="AttributesSerialize"></BinaryString>
-            <BinaryString name="Tags"></BinaryString>
-        </Properties>`;
+	var rect = divideIntoRectangles(pixels, threshold.value)
 
-  let xml = header;
-  let processed = 0, failed = 0;
+	var reassembled = reassembleImage(rect, image.width, image.height)
 
-  for (const [i, file] of Array.from(files).entries()) {
-    let img;
-    try {
-      const url = URL.createObjectURL(file);
-      img = await IJS.Image.load(url);
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      console.error("Failed to load:", file.name);
-      failed++; continue;
-    }
+	for (const x of range(image.width)) {
+		for (const y of range(image.height)) {
+			var pixel = reassembled[x][y]
 
-    const pix = [];
-    for (let x=0;x<img.width;x++){
-      const col=[];
-      for (let y=0;y<img.height;y++){
-        col.push(img.getPixelXY(x,y));
-      }
-      pix.push(col);
-    }
+			blocks_ctx.fillStyle = `hsl(${pixel[0]}, 100%, 50%)`
+			blocks_ctx.fillRect(x, y, 1, 1)
 
-    const rects = divideIntoRectangles(pix, threshold);
+			final_ctx.fillStyle = `rgba(${pixel[0]}, ${pixel[1]}, ${pixel[2]}, ${pixel[3] ?? 255})`
+			final_ctx.fillRect(x, y, 1, 1)
+		}
+	}
 
-    // part + surfacegui wrapper
-    xml += `
-        <Item class="Part">
-            <Properties>
-                <string name="Name">BypassedImage${i+1}</string>
-                <bool   name="Anchored">true</bool>
-                <Vector3 name="size"><X>16</X><Y>16</Y><Z>1</Z></Vector3>
-                <BinaryString name="AttributesSerialize"></BinaryString>
-                <BinaryString name="Tags"></BinaryString>
-            </Properties>
-            <Item class="SurfaceGui">
-                <Properties>
-                    <string name="Name">${i+1}</string>
-                    <bool   name="Active">true</bool>
-                    <Ref    name="Adornee">null</Ref>
-                    <Vector2 name="CanvasSize"><X>${img.width}</X><Y>${img.height}</Y></Vector2>
-                </Properties>`;
+	setDebugText("blocks", commaSeparate(rect.length))
+	setDebugText("time", `${Date.now() - startTime}ms`)
+	setDebugText("improvement", `${Math.round((1 - (rect.length / (image.width * image.height))) * 100)}%`)
 
-    for (const {rect, color} of rects) {
-      const [r,g,b,a] = color;
-      const alpha = keepAlpha ? a : 255;
-      xml += frameXML(rect.x, rect.y, rect.width, rect.height,
-                      img.width, img.height, 0.05, r,g,b, alpha);
-    }
+	return rect
+}
 
-    xml += `
-            </Item> <!-- SurfaceGui -->
-        </Item> <!-- Part -->`;
+// exports the string used in ROBLOX (old version)
+function exportToROBLOXOLD(rect) {
+	var output = `OUTPUTDATA1.0;WIDTH:${image.width};HEIGHT:${image.height};NAME:${fileupload.files[0].name};`
 
-    processed++;
-  }
+	for (const block of rect) {
+		output += block.rect.x + ","
+		output += block.rect.y + ","
 
-  xml += `
-    </Item> <!-- Model -->
-</roblox>`;
+		output += block.rect.width + ","
+		output += block.rect.height + ","
 
-  const blob = new Blob([xml], {type:"text/xml"});
-  const a    = document.createElement("a");
-  a.href     = URL.createObjectURL(blob);
+		output += block.color[0] + ","
+		output += block.color[1] + ","
+		output += block.color[2] + ","
+		output += block.color[3] ?? 255
 
-  // filename: folder name if available, else “BatchImages”
-  if (files.length === 1) {
-    a.download = files[0].name + ".rbxmx";
-  } else {
-    const path = files[0].webkitRelativePath;
-    const top  = path ? path.split("/")[0] : "BatchImages";
-    a.download = top + ".rbxmx";
-  }
-  a.click(); a.remove();
+		output += ";"
+	}
 
-  errorBox.textContent =
-    `Done. Exported ${processed} image(s)` +
-    (failed ? `; ${failed} failed.` : ".");
-});
+	output += "END"
+
+	return output
+}
+
+function exportToROBLOX(rect) {
+	var output = header
+
+	for (const block of rect) {
+		output += generateFrame(
+			block.rect.x,
+			block.rect.y,
+
+			block.rect.width,
+			block.rect.height,
+
+			image.width,
+			image.height,
+
+			0.05, //offset.value,
+
+			block.color[0],
+			block.color[1],
+			block.color[2],
+			enabletransparency.checked ? block.color[3] ?? 255 : 255
+		)
+	}
+
+	output += footer
+
+	return output
+}
+
+// begin the actual script
+
+var lastURL
+fileupload.addEventListener("change", async (event) => {
+	const file = event.target.files[0]
+
+	if (lastURL) URL.revokeObjectURL(lastURL)
+	lastURL = URL.createObjectURL(file)
+
+	error.innerHTML = ""
+
+	// theres a really fucking weird bug that happens when
+	// you try to upload really specific images. the error
+	// message says "Error: Unsupported filter: undefined"
+	// and i dont know how to fix it!!!!!!!!!!!!!!!!!!!!!!
+	window.image = await IJS.Image.load(lastURL)
+		.catch(err => {
+			error.innerHTML = `catastrophic error: "${err}"<br> please try another image!`
+
+			throw err
+		})
+
+	init()
+
+	var rect = run()
+
+	threshold.addEventListener("input", () => {
+		setDebugText("threshold", threshold.value)
+
+		if (threshold.value < 1) {
+			document.querySelector("#thresholdwarning").innerHTML = "note: a threshold of zero removes the block <br> compression entirely, instead directly <br> copying the pixels. use with caution! <br>"
+		} else {
+			document.querySelector("#thresholdwarning").innerHTML = ""
+		}
+
+		run()
+	})
+
+	// offset.addEventListener("input", () => {
+	// 	setDebugText("offset", offset.value)
+	// 	run()
+	// })
+})
+
+document.querySelector("#export").addEventListener("click", () => {
+	var output = exportToROBLOX(run())
+	
+	var file = new Blob([output], { type: "text/plain" })
+
+	var a = document.createElement("a")
+	a.download = `${fileupload.files[0].name}.rbxmx`
+	a.href = window.URL.createObjectURL(file)
+	a.click()
+	a.remove()
+})
+
+// allows you to use crazy thresholds like 100000
+extreme.addEventListener("click", () => {
+	if (extreme.checked == true) {
+		threshold.max = 100000
+	} else {
+		threshold.max = 1000
+	}
+})
+
+// reset all inputs on page load
+window.onload = () => {
+	threshold.value = 100
+	//offset.value = 0
+	extreme.checked = false
+	enabletransparency.checked = false
+
+	setDebugText("threshold", threshold.value)
+	//setDebugText("offset", offset.value)
+}

@@ -8,51 +8,49 @@
 <body>
   <h1>Roblox Image Bypasser — Batch Edition</h1>
 
-  <!-- ── File Input ─────────────────────────────────────────────────────────── -->
-  <label><b>Images&nbsp;(pick a folder):&nbsp;</b>
-    <!-- allow many files / whole folder -->
+  <!-- pick an entire folder of images -->
+  <label><b>Images (folder):</b>
     <input type="file" id="image" multiple webkitdirectory />
   </label>
   <br /><br />
 
-  <!-- ── Controls ──────────────────────────────────────────────────────────── -->
+  <!-- controls -->
   <label>
-    Threshold&nbsp;<span id="threshold-value">130</span>
+    Threshold <span id="threshold-value">130</span>
     <input type="range" id="threshold" min="0" max="255" value="130" />
   </label>
   &nbsp;&nbsp;
   <label>
-    <input type="checkbox" id="enabletransparency" />
+    <input type="checkbox" id="enabletransparency">
     Preserve transparent pixels
   </label>
   <br /><br />
 
-  <!-- ── Action Buttons ────────────────────────────────────────────────────── -->
-  <button id="export">Export → RBXMX</button>
+  <button id="export">Export → .rbxmx</button>
   <br /><br />
 
-  <!-- ── Info / Preview (single-image mode only) ───────────────────────────── -->
+  <!-- information panel -->
   <div id="info">
     <h3>information:</h3>
     <pre>
 size:          <span id="size">–</span>
 pixels:        <span id="pixels">–</span>
-blocks:        <span id="blocks">–</span>
+blocks:        <span id="blocksCount">–</span>
 improvement:   <span id="improvement">–</span>
 threshold:     <span id="threshold-info">130</span>
 time elapsed:  <span id="time">–</span></pre>
     <p id="error" style="color:#f55"></p>
   </div>
 
-  <!-- ── Hidden canvases (only used for single-image preview) ──────────────── -->
-  <canvas id="original" hidden></canvas>
-  <canvas id="blocks"   hidden></canvas>
-  <canvas id="final"    hidden></canvas>
+  <!-- canvases (only used for single-image preview) -->
+  <canvas id="original"     hidden></canvas>
+  <canvas id="blocksCanvas" hidden></canvas>
+  <canvas id="final"        hidden></canvas>
 
-  <!-- ── Dependencies ──────────────────────────────────────────────────────── -->
-  <script src="lib/ijskernel.js"></script> <!-- assumes you already have it -->
+  <!-- libraries -->
+  <!-- image-js UMD build (global IJS) -->
+  <script src="https://cdn.jsdelivr.net/npm/image-js/dist/image.min.js"></script> <!-- global IJS → works in any browser :contentReference[oaicite:0]{index=0} -->
   <script src="rect.js"></script>
-  <!-- ── Main logic ────────────────────────────────────────────────────────── -->
   <script src="index.js"></script>
 </body>
 </html>

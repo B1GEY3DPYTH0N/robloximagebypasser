@@ -1,140 +1,230 @@
-/*  index.js – batch‑enabled exporter  */
+// index.js
 
-import {
-  setDebugText,
-  commaSeparate,
-  range,
-  range2
-} from "./utility.js";
-import {
-  divideIntoRectangles,
-  reassembleImage
-} from "./rect.js";
-import { generateFrame, generateHeader, footer } from "./export.js";
+import { setDebugText, commaSeparate, range, range2 } from "./utility.js";
+import { divideIntoRectangles, reassembleImage } from "./rect.js";
+import { rbxmxHeader, rbxmxFooter, generateImagePart } from "./export.js";
 
-/* ----  DOM hooks  ---- */
-const fileInput = document.querySelector("#filePicker");
+// define our variables
+const original_canvas = document.querySelector("#original");
+const original_ctx = original_canvas.getContext("2d");
+const blocks_canvas = document.querySelector("#blocks");
+const blocks_ctx = blocks_canvas.getContext("2d");
+const final_canvas = document.querySelector("#final");
+const final_ctx = final_canvas.getContext("2d");
+
 const threshold = document.querySelector("#threshold");
-const enableTransparency = document.querySelector("#transparency");
+const fileupload = document.querySelector(`input[type="file"]`);
 const extreme = document.querySelector("#extreme");
+const enabletransparency = document.querySelector("#transparency");
+const error = document.querySelector("#error");
+const processBtn = document.querySelector("#process");
 const exportBtn = document.querySelector("#export");
-const errorBox = document.querySelector("#error");
+const statusDiv = document.querySelector("#process-status");
 
-/* A place to stash every image’s exported fragment. */
-let exportChunks = [];
+// Global state
+let lastFiles = [];
+let processedImages = [];
 
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                           */
-/* ------------------------------------------------------------------ */
-function loadImage(file) {
-  return IJS.Image.load(URL.createObjectURL(file));
+// init function is called to display a preview of one image
+async function init(image, filename) {
+	document.querySelector("#original-title").textContent = filename;
+	document.querySelector("#blocks-title").textContent = filename;
+	document.querySelector("#final-title").textContent = filename;
+
+	original_canvas.width = image.width;
+	original_canvas.height = image.height;
+	blocks_canvas.width = image.width;
+	blocks_canvas.height = image.height;
+	final_canvas.width = image.width;
+	final_canvas.height = image.height;
+    
+	original_ctx.clearRect(0, 0, original_canvas.width, original_canvas.height);
+	blocks_ctx.clearRect(0, 0, blocks_canvas.width, blocks_canvas.height);
+	final_ctx.clearRect(0, 0, final_canvas.width, final_canvas.height);
+
+	setDebugText("size", `${image.width}x${image.height}`);
+	setDebugText("pixels", commaSeparate(image.width * image.height));
+
+	for (const x of range(image.width)) {
+		for (const y of range(image.height)) {
+			var pixel = image.getPixelXY(x, y);
+			original_ctx.fillStyle = `rgba(${pixel[0]}, ${pixel[1]}, ${pixel[2]}, ${pixel[3] ?? 255})`;
+			original_ctx.fillRect(x, y, 1, 1);
+		}	
+	}
+
+	document.querySelector("#linewarning").innerHTML = "note: the squares/lines that may show up here will not <br> show up in-game.";
 }
 
-function analyse(image) {
-  /* Harvest the rectangle map. */
-  const pixels2D = [];
-  for (const x of range(image.width)) {
-    const col = [];
-    for (const y of range(image.height)) {
-      col.push(image.getPixelXY(x, y));
-    }
-    pixels2D.push(col);
-  }
-  return divideIntoRectangles(pixels2D, Number(threshold.value));
+// get a 2d array of pixels from a rectangular area
+function getPixels(x1, y1, x2, y2, image) {
+	var pixels = [];
+	for (const x of range2(x1, x2)) {
+		var row = [];
+		for (const y of range2(y1, y2)) {
+			row.push(image.getPixelXY(x, y));
+		}
+		pixels.push(row);
+	}
+	return pixels;
 }
 
-/* Build one complete “SurfaceGui” fragment for the specified file. */
-async function processFile(file) {
-  const img = await loadImage(file);
-  const rects = analyse(img);
+// the main script, runs for each image
+function run(image) {
+	var startTime = Date.now();
+	var pixels = getPixels(0, 0, image.width, image.height, image);
+	var rect = divideIntoRectangles(pixels, threshold.value);
+	var reassembled = reassembleImage(rect, image.width, image.height);
 
-  /* Progress ‑‑ dev only. Remove if not needed. */
-  console.info(`→ ${file.name}: ${rects.length} blocks`);
+	blocks_ctx.clearRect(0, 0, blocks_canvas.width, blocks_canvas.height);
+	final_ctx.clearRect(0, 0, final_canvas.width, final_canvas.height);
 
-  let chunk = generateHeader(file.name.replace(/\.[^.]+$/, "")); // strip extension
+	for (const x of range(image.width)) {
+		for (const y of range(image.height)) {
+			var pixel = reassembled[x][y];
+			blocks_ctx.fillStyle = `hsl(${pixel[0]}, 100%, 50%)`;
+			blocks_ctx.fillRect(x, y, 1, 1);
+			final_ctx.fillStyle = `rgba(${pixel[0]}, ${pixel[1]}, ${pixel[2]}, ${pixel[3] ?? 255})`;
+			final_ctx.fillRect(x, y, 1, 1);
+		}
+	}
 
-  for (const block of rects) {
-    const { x, y, width, height } = block.rect;
-    const [r, g, b, a] = block.color;
-    chunk += generateFrame(
-      x,
-      y,
-      width,
-      height,
-      img.width,
-      img.height,
-      0.05,
-      r,
-      g,
-      b,
-      enableTransparency.checked ? a ?? 255 : 255
-    );
-  }
-  chunk += footer;
-  return chunk;
+	setDebugText("blocks", commaSeparate(rect.length));
+	setDebugText("time", `${Date.now() - startTime}ms`);
+	setDebugText("improvement", `${Math.round((1 - (rect.length / (image.width * image.height))) * 100)}%`);
+
+	return rect;
 }
 
-/* ------------------------------------------------------------------ */
-/*  UI wiring                                                         */
-/* ------------------------------------------------------------------ */
-//const fileUpload       = document.querySelector("#fileUpload");
-//const exportBtnon     = document.querySelector("#export");
-let   pendingChunks    = [];   // holds header+frames+footer for each image
-let   lastObjectURL    = null; // for memory hygiene
+// Main logic for processing all selected files
+async function processFiles(files) {
+    processedImages = [];
+    error.innerHTML = "";
 
-fileInput.addEventListener("change", async (ev) => {
-    pendingChunks.length = 0;                  // reset
-    const files = [...ev.target.files]
-                 .filter(f => /^image\//.test(f.type));
-    if (!files.length) {
-        alert("No images found in that folder!"); return;
-    }
+    if (files.length === 0) return;
+    
+    let i = 1;
+    for (const file of files) {
+        statusDiv.innerHTML = `Processing image ${i}/${files.length}: ${file.name}`;
+        const fileURL = URL.createObjectURL(file);
+        
+        try {
+            const image = await IJS.Image.load(fileURL);
+            URL.revokeObjectURL(fileURL);
+            
+            // For the last image, update the canvas previews
+            if (i === files.length) {
+                await init(image, file.name);
+            }
+            
+            const rects = run(image);
+            
+            processedImages.push({
+                name: file.name,
+                width: image.width,
+                height: image.height,
+                rects: rects,
+            });
 
-    // sequential processing keeps RAM stable for huge batches
-    for (const f of files) {
-        if (lastObjectURL) URL.revokeObjectURL(lastObjectURL);
-        lastObjectURL = URL.createObjectURL(f);
-        window.image  = await IJS.Image.load(lastObjectURL);  // async
-        await init();                         // <‑‑ existing function
-        const rects   = run();                // <‑‑ existing function
-
-        // reuse *all* original maths and helpers
-        let out = makeHeader(f.name.replace(/\.[^.]+$/, "")); // new name
-        for (const blk of rects) {
-            out += generateFrame(
-                blk.rect.x, blk.rect.y,
-                blk.rect.width, blk.rect.height,
-                image.width,  image.height,
-                0.05,                             // same offset as UI
-                blk.color[0], blk.color[1], blk.color[2],
-                enabletransparency.checked ? blk.color[3] ?? 255 : 255
-            );
+        } catch (err) {
+            error.innerHTML += `Failed to process ${file.name}: "${err}"<br>`;
         }
-        out += footer;                          // close the SurfaceGui
-        pendingChunks.push(out);                // stash for later
+        i++;
+    }
+    statusDiv.innerHTML = `Processed ${processedImages.length} of ${files.length} images. Ready to export.`;
+}
+
+function exportToROBLOX() {
+    if (processedImages.length === 0) {
+        alert("No images processed. Please select images and click 'Process!' first.");
+        return null;
     }
 
-    setDebugText("blocks", commaSeparate(pendingChunks.length));
+	let output = rbxmxHeader;
+    const partSpacing = 20; // 20 studs between parts
+
+	processedImages.forEach((procImg, index) => {
+        const position = { x: index * partSpacing, y: 0, z: 0 };
+        const imageName = procImg.name.replace(/[^a-zA-Z0-9]/g, '_'); // Sanitize name
+        output += generateImagePart(
+            procImg.rects,
+            imageName,
+            procImg.width,
+            procImg.height,
+            position,
+            enabletransparency.checked
+        );
+    });
+
+	output += rbxmxFooter;
+	return output;
+}
+
+// --- Event Listeners ---
+
+fileupload.addEventListener("change", (event) => {
+    lastFiles = event.target.files;
+    statusDiv.innerHTML = `${lastFiles.length} file(s) selected. Adjust settings and click 'Process!'`;
+    exportBtn.disabled = true;
+});
+
+processBtn.addEventListener("click", async () => {
+    if (lastFiles.length === 0) {
+        alert("Please select images first.");
+        return;
+    }
+    exportBtn.disabled = true;
+    processBtn.disabled = true;
+    processBtn.textContent = "Processing...";
+
+    await processFiles(lastFiles);
+
+    if(processedImages.length > 0) {
+        exportBtn.disabled = false;
+    }
+    processBtn.disabled = false;
+    processBtn.textContent = "Process!";
 });
 
 exportBtn.addEventListener("click", () => {
-    if (!pendingChunks.length) {
-        alert("Pick a folder first!"); return;
+	const output = exportToROBLOX();
+    if (!output) return;
+
+	const file = new Blob([output], { type: "text/plain" });
+
+    let downloadName = 'batch_export.rbxmx';
+    if (lastFiles.length > 0) {
+        const baseName = lastFiles[0].name.substring(0, lastFiles[0].name.lastIndexOf('.')) || 'image';
+        downloadName = lastFiles.length === 1 ? `${baseName}.rbxmx` : `${baseName}_and_${lastFiles.length-1}_others.rbxmx`;
     }
-    /* DO ***NOT*** INSERT NEWLINES — join with a single space so the
-       token stream remains contiguous. */
-    const blob = new Blob([pendingChunks.join(" ")], {type: "text/plain"});
-    const a    = document.createElement("a");
-    a.download = "batch_export.rbxmx";
-    a.href     = URL.createObjectURL(blob);
-    a.click();
-    a.remove();
+
+	const a = document.createElement("a");
+	a.download = downloadName;
+	a.href = window.URL.createObjectURL(file);
+	a.click();
+	a.remove();
 });
 
-/* Defaults */
+threshold.addEventListener("input", () => {
+    setDebugText("threshold", threshold.value);
+    if (threshold.value < 1) {
+        document.querySelector("#thresholdwarning").innerHTML = "note: a threshold of zero removes the block <br> compression entirely, instead directly <br> copying the pixels. use with caution! <br>";
+    } else {
+        document.querySelector("#thresholdwarning").innerHTML = "";
+    }
+});
+
+extreme.addEventListener("click", () => {
+	if (extreme.checked == true) {
+		threshold.max = 100000;
+	} else {
+		threshold.max = 1000;
+	}
+});
+
 window.onload = () => {
-  threshold.value = 100;
-  extreme.checked = false;
-  enableTransparency.checked = false;
-  setDebugText("threshold", threshold.value);
+	threshold.value = 50;
+	extreme.checked = false;
+	enabletransparency.checked = false;
+	setDebugText("threshold", threshold.value);
 };

@@ -77,43 +77,58 @@ async function processFile(file) {
 /* ------------------------------------------------------------------ */
 /*  UI wiring                                                         */
 /* ------------------------------------------------------------------ */
-fileInput.addEventListener("change", async (e) => {
-  exportChunks = [];                                    // reset
-  errorBox.textContent = "";
+//const fileUpload       = document.querySelector("#fileUpload");
+//const exportBtnon     = document.querySelector("#export");
+let   pendingChunks    = [];   // holds header+frames+footer for each image
+let   lastObjectURL    = null; // for memory hygiene
 
-  const files = [...e.target.files].filter((f) =>
-    /^image\//.test(f.type)
-  );
-
-  /* The extreme checkbox still only widens the range of the slider,
-     but is now applied to *all* images. */
-  threshold.max = extreme.checked ? 100000 : 1000;
-
-  try {
-    for (const f of files) {
-      /* eslint‑disable-next-line no-await-in-loop */
-      exportChunks.push(await processFile(f));
+fileInput.addEventListener("change", async (ev) => {
+    pendingChunks.length = 0;                  // reset
+    const files = [...ev.target.files]
+                 .filter(f => /^image\//.test(f.type));
+    if (!files.length) {
+        alert("No images found in that folder!"); return;
     }
-    setDebugText("blocks", commaSeparate(exportChunks.length));
-  } catch (err) {
-    console.error(err);
-    errorBox.textContent = `Failed: ${err.message}`;
-  }
+
+    // sequential processing keeps RAM stable for huge batches
+    for (const f of files) {
+        if (lastObjectURL) URL.revokeObjectURL(lastObjectURL);
+        lastObjectURL = URL.createObjectURL(f);
+        window.image  = await IJS.Image.load(lastObjectURL);  // async
+        await init();                         // <‑‑ existing function
+        const rects   = run();                // <‑‑ existing function
+
+        // reuse *all* original maths and helpers
+        let out = makeHeader(f.name.replace(/\.[^.]+$/, "")); // new name
+        for (const blk of rects) {
+            out += generateFrame(
+                blk.rect.x, blk.rect.y,
+                blk.rect.width, blk.rect.height,
+                image.width,  image.height,
+                0.05,                             // same offset as UI
+                blk.color[0], blk.color[1], blk.color[2],
+                enabletransparency.checked ? blk.color[3] ?? 255 : 255
+            );
+        }
+        out += footer;                          // close the SurfaceGui
+        pendingChunks.push(out);                // stash for later
+    }
+
+    setDebugText("blocks", commaSeparate(pendingChunks.length));
 });
 
 exportBtn.addEventListener("click", () => {
-  if (!exportChunks.length) {
-    alert("Select a folder of images first!");
-    return;
-  }
-  const blob = new Blob([exportChunks.join("\n")], {
-    type: "text/plain"
-  });
-  const a = document.createElement("a");
-  a.download = "batch_export.rbxmx";
-  a.href = URL.createObjectURL(blob);
-  a.click();
-  a.remove();
+    if (!pendingChunks.length) {
+        alert("Pick a folder first!"); return;
+    }
+    /* DO ***NOT*** INSERT NEWLINES — join with a single space so the
+       token stream remains contiguous. */
+    const blob = new Blob([pendingChunks.join(" ")], {type: "text/plain"});
+    const a    = document.createElement("a");
+    a.download = "batch_export.rbxmx";
+    a.href     = URL.createObjectURL(blob);
+    a.click();
+    a.remove();
 });
 
 /* Defaults */

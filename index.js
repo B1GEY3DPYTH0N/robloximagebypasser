@@ -1,241 +1,125 @@
-import { setDebugText, commaSeparate, range, range2, randInt, chunkArray } from "./utility.js"
-import { divideIntoRectangles, reassembleImage } from "./rect.js"
-import { generateFrame, header, footer } from "./export.js"
+/*  index.js – batch‑enabled exporter  */
 
-// define our variables
+import {
+  setDebugText,
+  commaSeparate,
+  range,
+  range2
+} from "./utility.js";
+import {
+  divideIntoRectangles,
+  reassembleImage
+} from "./rect.js";
+import { generateFrame, generateHeader, footer } from "./export.js";
 
-const original_canvas = document.querySelector("#original")
-const original_ctx = original_canvas.getContext("2d")
+/* ----  DOM hooks  ---- */
+const fileInput = document.querySelector("#filePicker");
+const threshold = document.querySelector("#threshold");
+const enableTransparency = document.querySelector("#transparency");
+const extreme = document.querySelector("#extreme");
+const exportBtn = document.querySelector("#export");
+const errorBox = document.querySelector("#error");
 
-const blocks_canvas = document.querySelector("#blocks")
-const blocks_ctx = blocks_canvas.getContext("2d")
+/* A place to stash every image’s exported fragment. */
+let exportChunks = [];
 
-const final_canvas = document.querySelector("#final")
-const final_ctx = final_canvas.getContext("2d")
-
-//const offset = document.querySelector("#offset")
-const threshold = document.querySelector("#threshold")
-const fileupload = document.querySelector(`input[type="file"]`)
-const extreme = document.querySelector("#extreme")
-const enabletransparency = document.querySelector("#transparency")
-const error = document.querySelector("#error")
-
-// the init function is called when an image is uploaded
-
-async function init() {
-	original_canvas.width = image.width
-	original_canvas.height = image.height
-
-	blocks_canvas.width = image.width
-	blocks_canvas.height = image.height
-
-	final_canvas.width = image.width
-	final_canvas.height = image.height
-
-	setDebugText("size", `${image.width}x${image.height}`)
-	setDebugText("pixels", commaSeparate(image.width * image.height))
-
-	for (const x of range(image.width)) {
-		for (const y of range(image.height)) {
-			var pixel = image.getPixelXY(x, y)
-
-			original_ctx.fillStyle = `rgba(${pixel[0]}, ${pixel[1]}, ${pixel[2]}, ${pixel[3] ?? 255})`
-			original_ctx.fillRect(x, y, 1, 1)
-		}	
-	}
-
-	document.querySelector("#linewarning").innerHTML = "note: the squares/lines that may show up here will not <br> show up in-game."
+/* ------------------------------------------------------------------ */
+/*  Helpers                                                           */
+/* ------------------------------------------------------------------ */
+function loadImage(file) {
+  return IJS.Image.load(URL.createObjectURL(file));
 }
 
-// this function isn't used anymore but i didnt wanna get rid of it
-function splitImage() {
-	var colors = {}
-
-	for (const x of range(image.width)) {
-		for (const y of range(image.height)) {
-			var pixel = image.getPixelXY(x, y)
-			var color = `${pixel[0]}, ${pixel[1]}, ${pixel[2]}, ${pixel[3] ?? 255}`
-
-			if (colors[color] == undefined) {
-				colors[color] = []
-			}
-
-			colors[color].push([x, y])
-		}	
-
-	}
-
-	return colors
+function analyse(image) {
+  /* Harvest the rectangle map. */
+  const pixels2D = [];
+  for (const x of range(image.width)) {
+    const col = [];
+    for (const y of range(image.height)) {
+      col.push(image.getPixelXY(x, y));
+    }
+    pixels2D.push(col);
+  }
+  return divideIntoRectangles(pixels2D, Number(threshold.value));
 }
 
-// get a 2d array of pixels from a rectangular area
-function getPixels(x1, y1, x2, y2) {
-	var pixels = []
+/* Build one complete “SurfaceGui” fragment for the specified file. */
+async function processFile(file) {
+  const img = await loadImage(file);
+  const rects = analyse(img);
 
-	for (const x of range2(x1, x2)) {
-		var row = []
-		for (const y of range2(y1, y2)) {
-			row.push(image.getPixelXY(x, y))
-		}
-		pixels.push(row)
-	}
+  /* Progress ‑‑ dev only. Remove if not needed. */
+  console.info(`→ ${file.name}: ${rects.length} blocks`);
 
-	return pixels
+  let chunk = generateHeader(file.name.replace(/\.[^.]+$/, "")); // strip extension
+
+  for (const block of rects) {
+    const { x, y, width, height } = block.rect;
+    const [r, g, b, a] = block.color;
+    chunk += generateFrame(
+      x,
+      y,
+      width,
+      height,
+      img.width,
+      img.height,
+      0.05,
+      r,
+      g,
+      b,
+      enableTransparency.checked ? a ?? 255 : 255
+    );
+  }
+  chunk += footer;
+  return chunk;
 }
 
-// the main script, runs every time the threshold is changed
-function run() {
-	var startTime = Date.now()
+/* ------------------------------------------------------------------ */
+/*  UI wiring                                                         */
+/* ------------------------------------------------------------------ */
+fileInput.addEventListener("change", async (e) => {
+  exportChunks = [];                                    // reset
+  errorBox.textContent = "";
 
-	var pixels = getPixels(0, 0, image.width, image.height)
+  const files = [...e.target.files].filter((f) =>
+    /^image\//.test(f.type)
+  );
 
-	var rect = divideIntoRectangles(pixels, threshold.value)
+  /* The extreme checkbox still only widens the range of the slider,
+     but is now applied to *all* images. */
+  threshold.max = extreme.checked ? 100000 : 1000;
 
-	var reassembled = reassembleImage(rect, image.width, image.height)
+  try {
+    for (const f of files) {
+      /* eslint‑disable-next-line no-await-in-loop */
+      exportChunks.push(await processFile(f));
+    }
+    setDebugText("blocks", commaSeparate(exportChunks.length));
+  } catch (err) {
+    console.error(err);
+    errorBox.textContent = `Failed: ${err.message}`;
+  }
+});
 
-	for (const x of range(image.width)) {
-		for (const y of range(image.height)) {
-			var pixel = reassembled[x][y]
+exportBtn.addEventListener("click", () => {
+  if (!exportChunks.length) {
+    alert("Select a folder of images first!");
+    return;
+  }
+  const blob = new Blob([exportChunks.join("\n")], {
+    type: "text/plain"
+  });
+  const a = document.createElement("a");
+  a.download = "batch_export.rbxmx";
+  a.href = URL.createObjectURL(blob);
+  a.click();
+  a.remove();
+});
 
-			blocks_ctx.fillStyle = `hsl(${pixel[0]}, 100%, 50%)`
-			blocks_ctx.fillRect(x, y, 1, 1)
-
-			final_ctx.fillStyle = `rgba(${pixel[0]}, ${pixel[1]}, ${pixel[2]}, ${pixel[3] ?? 255})`
-			final_ctx.fillRect(x, y, 1, 1)
-		}
-	}
-
-	setDebugText("blocks", commaSeparate(rect.length))
-	setDebugText("time", `${Date.now() - startTime}ms`)
-	setDebugText("improvement", `${Math.round((1 - (rect.length / (image.width * image.height))) * 100)}%`)
-
-	return rect
-}
-
-// exports the string used in ROBLOX (old version)
-function exportToROBLOXOLD(rect) {
-	var output = `OUTPUTDATA1.0;WIDTH:${image.width};HEIGHT:${image.height};NAME:${fileupload.files[0].name};`
-
-	for (const block of rect) {
-		output += block.rect.x + ","
-		output += block.rect.y + ","
-
-		output += block.rect.width + ","
-		output += block.rect.height + ","
-
-		output += block.color[0] + ","
-		output += block.color[1] + ","
-		output += block.color[2] + ","
-		output += block.color[3] ?? 255
-
-		output += ";"
-	}
-
-	output += "END"
-
-	return output
-}
-
-function exportToROBLOX(rect) {
-	var output = header
-
-	for (const block of rect) {
-		output += generateFrame(
-			block.rect.x,
-			block.rect.y,
-
-			block.rect.width,
-			block.rect.height,
-
-			image.width,
-			image.height,
-
-			0.05, //offset.value,
-
-			block.color[0],
-			block.color[1],
-			block.color[2],
-			enabletransparency.checked ? block.color[3] ?? 255 : 255
-		)
-	}
-
-	output += footer
-
-	return output
-}
-
-// begin the actual script
-
-var lastURL
-fileupload.addEventListener("change", async (event) => {
-	const file = event.target.files[0]
-
-	if (lastURL) URL.revokeObjectURL(lastURL)
-	lastURL = URL.createObjectURL(file)
-
-	error.innerHTML = ""
-
-	// theres a really fucking weird bug that happens when
-	// you try to upload really specific images. the error
-	// message says "Error: Unsupported filter: undefined"
-	// and i dont know how to fix it!!!!!!!!!!!!!!!!!!!!!!
-	window.image = await IJS.Image.load(lastURL)
-		.catch(err => {
-			error.innerHTML = `catastrophic error: "${err}"<br> please try another image!`
-
-			throw err
-		})
-
-	init()
-
-	var rect = run()
-
-	threshold.addEventListener("input", () => {
-		setDebugText("threshold", threshold.value)
-
-		if (threshold.value < 1) {
-			document.querySelector("#thresholdwarning").innerHTML = "note: a threshold of zero removes the block <br> compression entirely, instead directly <br> copying the pixels. use with caution! <br>"
-		} else {
-			document.querySelector("#thresholdwarning").innerHTML = ""
-		}
-
-		run()
-	})
-
-	// offset.addEventListener("input", () => {
-	// 	setDebugText("offset", offset.value)
-	// 	run()
-	// })
-})
-
-document.querySelector("#export").addEventListener("click", () => {
-	var output = exportToROBLOX(run())
-	
-	var file = new Blob([output], { type: "text/plain" })
-
-	var a = document.createElement("a")
-	a.download = `${fileupload.files[0].name}.rbxmx`
-	a.href = window.URL.createObjectURL(file)
-	a.click()
-	a.remove()
-})
-
-// allows you to use crazy thresholds like 100000
-extreme.addEventListener("click", () => {
-	if (extreme.checked == true) {
-		threshold.max = 100000
-	} else {
-		threshold.max = 1000
-	}
-})
-
-// reset all inputs on page load
+/* Defaults */
 window.onload = () => {
-	threshold.value = 100
-	//offset.value = 0
-	extreme.checked = false
-	enabletransparency.checked = false
-
-	setDebugText("threshold", threshold.value)
-	//setDebugText("offset", offset.value)
-}
+  threshold.value = 100;
+  extreme.checked = false;
+  enableTransparency.checked = false;
+  setDebugText("threshold", threshold.value);
+};

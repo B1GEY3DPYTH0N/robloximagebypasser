@@ -30,3 +30,9 @@ export function generateFrame(
 ) {
   return ` true  0 0 true 0  ${r / 255} ${g / 255} ${b / 255} ${(255 - a) / 255}  0.105882362 0.164705887 0.207843155 0 0 false false 0 Frame null null null null  ${x / imagewidth} 0 ${y / imageheight} 0 null 0 false 0 0 0 0 false null 0  ${(width / imagewidth) + imageoffset} 0 ${(height / imageheight) + imageoffset} 0 0 -1 0 true 1 `;
 }
+
+export function makeHeader(newName = "BypassedImage") {
+    // the header always contains exactly one space‑delimited token that
+    // is the SurfaceGui.Name string.  We can replace the first occurrence.
+    return header.replace("BypassedImage", newName);
+}

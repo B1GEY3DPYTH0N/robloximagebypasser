@@ -52,7 +52,7 @@ export const generateFrame = (x, y, width, height, imagewidth, imageheight, imag
 		<token name="SelectionBehaviorDown">0</token>
 		<token name="SelectionBehaviorLeft">0</token>
 		<token name="SelectionBehaviorRight">0</token>
-		<token name="SelectionBehaviorUp">0</token>
+		<token name="SelectionBehaviorUp">0</bool>
 		<bool name="SelectionGroup">false</bool>
 		<Ref name="SelectionImageObject">null</Ref>
 		<int name="SelectionOrder">0</int>
@@ -83,7 +83,7 @@ export const generateImagePart = (rects, imageName, imageWidth, imageHeight, pos
 			block.rect.height,
 			imageWidth,
 			imageHeight,
-			0.0, // This was previously hardcoded offset, can be set to 0
+			0.002, // Keep the small overlap, it's still good practice
 			block.color[0],
 			block.color[1],
 			block.color[2],
@@ -124,7 +124,12 @@ export const generateImagePart = (rects, imageName, imageWidth, imageHeight, pos
 			<bool name="CastShadow">true</bool>
 			<string name="CollisionGroup">Default</string>
 			<int name="CollisionGroupId">0</int>
-			<Color3uint8 name="Color3uint8">4294967295</Color3uint8>
+			<!-- THE FIX IS HERE: Part color changed from white to black -->
+			<Color3 name="Color">
+				<R>0</R>
+				<G>0</G>
+				<B>0</B>
+			</Color3>
 			<PhysicalProperties name="CustomPhysicalProperties">
 				<CustomPhysics>false</CustomPhysics>
 			</PhysicalProperties>
